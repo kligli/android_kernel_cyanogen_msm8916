@@ -22,6 +22,7 @@
 #include <linux/pagevec.h>
 #include <linux/random.h>
 #include <linux/aio.h>
+#include <linux/uuid.h>
 #include <linux/file.h>
 
 #include "f2fs.h"
@@ -135,7 +136,7 @@ static inline bool need_do_checkpoint(struct inode *inode)
 
 	if (!S_ISREG(inode->i_mode) || inode->i_nlink != 1)
 		need_cp = true;
-	else if (is_sbi_flag_set(sbi, SBI_NEED_CP))
+	else if (file_enc_name(inode) && need_dentry_mark(sbi, inode->i_ino))
 		need_cp = true;
 	else if (file_wrong_pino(inode))
 		need_cp = true;
@@ -473,9 +474,9 @@ static int f2fs_file_open(struct inode *inode, struct file *filp)
 		if (!fscrypt_has_encryption_key(inode))
 			return -ENOKEY;
 	}
-	dir = dget_parent(filp->f_path.dentry);
-	if (f2fs_encrypted_inode(dir->d_inode) &&
-			!fscrypt_has_permitted_context(dir->d_inode, inode)) {
+	dir = dget_parent(file_dentry(filp));
+	if (f2fs_encrypted_inode(d_inode(dir)) &&
+			!fscrypt_has_permitted_context(d_inode(dir), inode)) {
 		dput(dir);
 		return -EPERM;
 	}
@@ -658,7 +659,7 @@ int f2fs_truncate(struct inode *inode)
 int f2fs_getattr(struct vfsmount *mnt,
 			 struct dentry *dentry, struct kstat *stat)
 {
-	struct inode *inode = dentry->d_inode;
+	struct inode *inode = d_inode(dentry);
 	generic_fillattr(inode, stat);
 	stat->blocks <<= 3;
 	return 0;
@@ -696,7 +697,7 @@ static void __setattr_copy(struct inode *inode, const struct iattr *attr)
 
 int f2fs_setattr(struct dentry *dentry, struct iattr *attr)
 {
-	struct inode *inode = dentry->d_inode;
+	struct inode *inode = d_inode(dentry);
 	int err;
 
 	err = inode_change_ok(inode, attr);
@@ -1475,7 +1476,7 @@ static int f2fs_ioc_setflags(struct file *filp, unsigned long arg)
 {
 	struct inode *inode = file_inode(filp);
 	struct f2fs_inode_info *fi = F2FS_I(inode);
-	unsigned int flags;
+	unsigned int flags = fi->i_flags & FS_FL_USER_VISIBLE;
 	unsigned int oldflags;
 	int ret;
 
@@ -1699,22 +1700,22 @@ static int f2fs_ioc_shutdown(struct file *filp, unsigned long arg)
 		return ret;
 
 	switch (in) {
-	case FS_GOING_DOWN_FULLSYNC:
+	case F2FS_GOING_DOWN_FULLSYNC:
 		sb = freeze_bdev(sb->s_bdev);
 		if (sb && !IS_ERR(sb)) {
 			f2fs_stop_checkpoint(sbi, false);
 			thaw_bdev(sb->s_bdev, sb);
 		}
 		break;
-	case FS_GOING_DOWN_METASYNC:
+	case F2FS_GOING_DOWN_METASYNC:
 		/* do checkpoint only */
 		f2fs_sync_fs(sb, 1);
 		f2fs_stop_checkpoint(sbi, false);
 		break;
-	case FS_GOING_DOWN_NOSYNC:
+	case F2FS_GOING_DOWN_NOSYNC:
 		f2fs_stop_checkpoint(sbi, false);
 		break;
-	case FS_GOING_DOWN_METAFLUSH:
+	case F2FS_GOING_DOWN_METAFLUSH:
 		sync_meta_pages(sbi, META, LONG_MAX);
 		f2fs_stop_checkpoint(sbi, false);
 		break;
@@ -2107,19 +2108,15 @@ static int f2fs_move_file_range(struct file *file_in, loff_t pos_in,
 	if (unlikely(f2fs_readonly(src->i_sb)))
 		return -EROFS;
 
-	if (!S_ISREG(src->i_mode) || !S_ISREG(dst->i_mode))
-		return -EINVAL;
+	if (S_ISDIR(src->i_mode) || S_ISDIR(dst->i_mode))
+		return -EISDIR;
 
 	if (f2fs_encrypted_inode(src) || f2fs_encrypted_inode(dst))
 		return -EOPNOTSUPP;
 
 	inode_lock(src);
-	if (src != dst) {
-		if (!inode_trylock(dst)) {
-			ret = -EBUSY;
-			goto out;
-		}
-	}
+	if (src != dst)
+		inode_lock(dst);
 
 	ret = -EINVAL;
 	if (pos_in + len > src->i_size || pos_in + len < pos_in)
@@ -2177,7 +2174,6 @@ static int f2fs_move_file_range(struct file *file_in, loff_t pos_in,
 out_unlock:
 	if (src != dst)
 		inode_unlock(dst);
-out:
 	inode_unlock(src);
 	return ret;
 }
@@ -2241,7 +2237,7 @@ long f2fs_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 		return f2fs_ioc_release_volatile_write(filp);
 	case F2FS_IOC_ABORT_VOLATILE_WRITE:
 		return f2fs_ioc_abort_volatile_write(filp);
-	case FS_IOC_SHUTDOWN:
+	case F2FS_IOC_SHUTDOWN:
 		return f2fs_ioc_shutdown(filp, arg);
 	case FITRIM:
 		return f2fs_ioc_fitrim(filp, arg);
@@ -2269,8 +2265,8 @@ static ssize_t f2fs_file_aio_write(struct kiocb *iocb, const struct iovec *iov,
 {
 	struct file *file = iocb->ki_filp;
 	struct inode *inode = file_inode(file);
-	struct blk_plug plug;
 	size_t count;
+	struct blk_plug plug;
 	ssize_t ret;
 
 	if (f2fs_encrypted_inode(inode) &&
@@ -2324,7 +2320,7 @@ long f2fs_compat_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 	case F2FS_IOC_START_VOLATILE_WRITE:
 	case F2FS_IOC_RELEASE_VOLATILE_WRITE:
 	case F2FS_IOC_ABORT_VOLATILE_WRITE:
-	case FS_IOC_SHUTDOWN:
+	case F2FS_IOC_SHUTDOWN:
 	case F2FS_IOC_SET_ENCRYPTION_POLICY:
 	case F2FS_IOC_GET_ENCRYPTION_PWSALT:
 	case F2FS_IOC_GET_ENCRYPTION_POLICY:

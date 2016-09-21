@@ -263,11 +263,6 @@ void f2fs_submit_page_mbio(struct f2fs_io_info *fio)
 
 	down_write(&io->io_rwsem);
 
-	/* WRITE can be merged into previous WRITE_SYNC */
-	if (io->bio && io->last_block_in_bio == fio->new_blkaddr - 1 &&
-						io->fio.rw == WRITE_SYNC)
-		fio->rw = WRITE_SYNC;
-
 	if (io->bio && (io->last_block_in_bio != fio->new_blkaddr - 1 ||
 						io->fio.rw != fio->rw))
 		__submit_merged_bio(io);
@@ -625,12 +620,7 @@ ssize_t f2fs_preallocate_blocks(struct inode *inode, loff_t pos, size_t count, b
 	ssize_t ret = 0;
 
 	map.m_lblk = F2FS_BLK_ALIGN(pos);
-	map.m_len = F2FS_BYTES_TO_BLK(pos + count);
-	if (map.m_len > map.m_lblk)
-		map.m_len -= map.m_lblk;
-	else
-		map.m_len = 0;
-
+	map.m_len = F2FS_BYTES_TO_BLK(count);
 	map.m_next_pgofs = NULL;
 
 	if (f2fs_encrypted_inode(inode))
@@ -675,9 +665,6 @@ int f2fs_map_blocks(struct inode *inode, struct f2fs_map_blocks *map,
 	struct extent_info ei;
 	bool allocated = false;
 	block_t blkaddr;
-
-	if (!maxblocks)
-		return 0;
 
 	map->m_len = 0;
 	map->m_flags = 0;
@@ -790,7 +777,6 @@ skip:
 		err = reserve_new_blocks(&dn, prealloc);
 		if (err)
 			goto sync_out;
-		allocated = dn.node_changed;
 
 		map->m_len += dn.ofs_in_node - ofs_in_node;
 		if (prealloc && dn.ofs_in_node != last_ofs_in_node + 1) {
@@ -974,8 +960,8 @@ out:
 	return ret;
 }
 
-static struct bio *f2fs_grab_bio(struct inode *inode, block_t blkaddr,
-				 unsigned nr_pages)
+struct bio *f2fs_grab_bio(struct inode *inode, block_t blkaddr,
+							unsigned nr_pages)
 {
 	struct f2fs_sb_info *sbi = F2FS_I_SB(inode);
 	struct fscrypt_ctx *ctx = NULL;
@@ -991,7 +977,7 @@ static struct bio *f2fs_grab_bio(struct inode *inode, block_t blkaddr,
 		f2fs_wait_on_encrypted_page_writeback(sbi, blkaddr);
 	}
 
-	bio = bio_alloc(GFP_KERNEL, min_t(int, nr_pages, bio_get_nr_vecs(bdev)));
+	bio = bio_alloc(GFP_KERNEL, min_t(int, nr_pages, BIO_MAX_PAGES));
 	if (!bio) {
 		if (ctx)
 			fscrypt_release_ctx(ctx);
@@ -1704,11 +1690,11 @@ static int f2fs_write_end(struct file *file,
 	trace_f2fs_write_end(inode, pos, len, copied);
 
 	set_page_dirty(page);
+	f2fs_put_page(page, 1);
 
 	if (pos + copied > i_size_read(inode))
 		f2fs_i_size_write(inode, pos + copied);
 
-	f2fs_put_page(page, 1);
 	f2fs_update_time(F2FS_I_SB(inode), REQ_TIME);
 	return copied;
 }
@@ -1777,8 +1763,7 @@ static ssize_t f2fs_direct_IO(int rw, struct kiocb *iocb,
 	err = blockdev_direct_IO(rw, iocb, inode, iov, offset, nr_segs,
 							get_data_block_dio);
 	up_read(&F2FS_I(inode)->dio_rwsem[rw]);
-
-	if (rw & WRITE) {
+	if (err < 0 && (rw & WRITE)) {
 		if (err > 0)
 			set_inode_flag(inode, FI_UPDATE_WRITE);
 		else if (err < 0)
