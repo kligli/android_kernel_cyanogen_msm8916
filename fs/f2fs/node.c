@@ -64,6 +64,8 @@ bool available_free_memory(struct f2fs_sb_info *sbi, int type)
 		res = mem_size < ((avail_ram * nm_i->ram_thresh / 100) >> 2);
 		if (excess_cached_nats(sbi))
 			res = false;
+		if (nm_i->nat_cnt > DEF_NAT_CACHE_THRESHOLD)
+			res = false;
 	} else if (type == DIRTY_DENTS) {
 		if (sbi->sb->s_bdi->dirty_exceeded)
 			return false;
@@ -1165,6 +1167,7 @@ repeat:
 		goto out_err;
 page_hit:
 	mark_page_accessed(page);
+
 	if(unlikely(nid != nid_of_node(page))) {
 		f2fs_bug_on(sbi, 1);
 		ClearPageUptodate(page);

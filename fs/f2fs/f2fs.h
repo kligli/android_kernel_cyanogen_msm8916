@@ -153,11 +153,6 @@ static inline void inode_unlock(struct inode *inode)
 	mutex_unlock(&inode->i_mutex);
 }
 
-static inline int inode_trylock(struct inode *inode)
-{
-	return mutex_trylock(&inode->i_mutex);
-}
-
 /**
  * wq_has_sleeper - check if there are any waiting processes
  * @wq: wait queue head
@@ -179,6 +174,16 @@ static inline bool wq_has_sleeper(wait_queue_head_t *wq)
 	return waitqueue_active(wq);
 }
 
+static inline struct dentry *file_dentry(const struct file *file)
+{
+	return file->f_path.dentry;
+}
+
+static inline void inode_nohighmem(struct inode *inode)
+{
+	mapping_set_gfp_mask(inode->i_mapping, GFP_USER);
+}
+
 /*
  * For checkpoint manager
  */
@@ -195,7 +200,7 @@ enum {
 	CP_DISCARD,
 };
 
-#define DEF_BATCHED_TRIM_SECTIONS	2
+#define DEF_BATCHED_TRIM_SECTIONS	32
 #define BATCHED_TRIM_SEGMENTS(sbi)	\
 		(SM_I(sbi)->trim_sections * (sbi)->segs_per_sec)
 #define BATCHED_TRIM_BLOCKS(sbi)	\
@@ -295,15 +300,6 @@ static inline bool __has_cursum_space(struct f2fs_journal *journal,
 #define F2FS_IOC_GETFLAGS		FS_IOC_GETFLAGS
 #define F2FS_IOC_SETFLAGS		FS_IOC_SETFLAGS
 #define F2FS_IOC_GETVERSION		FS_IOC_GETVERSION
-#define FS_IOC_SHUTDOWN        _IOR('X', 125, __u32)   /* Shutdown */
-
-/*
- * Flags for going down operation used by FS_IOC_GOINGDOWN
- */
-#define FS_GOING_DOWN_FULLSYNC 0x0     /* going down with full sync */
-#define FS_GOING_DOWN_METASYNC 0x1     /* going down with metadata */
-#define FS_GOING_DOWN_NOSYNC   0x2     /* going down */
-#define FS_GOING_DOWN_METAFLUSH	0x3	/* going down with meta flush */
 
 #define F2FS_IOCTL_MAGIC		0xf5
 #define F2FS_IOC_START_ATOMIC_WRITE	_IO(F2FS_IOCTL_MAGIC, 1)
@@ -320,6 +316,16 @@ static inline bool __has_cursum_space(struct f2fs_journal *journal,
 #define F2FS_IOC_SET_ENCRYPTION_POLICY	FS_IOC_SET_ENCRYPTION_POLICY
 #define F2FS_IOC_GET_ENCRYPTION_POLICY	FS_IOC_GET_ENCRYPTION_POLICY
 #define F2FS_IOC_GET_ENCRYPTION_PWSALT	FS_IOC_GET_ENCRYPTION_PWSALT
+
+/*
+ * should be same as XFS_IOC_GOINGDOWN.
+ * Flags for going down operation used by FS_IOC_GOINGDOWN
+ */
+#define F2FS_IOC_SHUTDOWN	_IOR('X', 125, __u32)	/* Shutdown */
+#define F2FS_GOING_DOWN_FULLSYNC	0x0	/* going down with full sync */
+#define F2FS_GOING_DOWN_METASYNC	0x1	/* going down with metadata */
+#define F2FS_GOING_DOWN_NOSYNC		0x2	/* going down */
+#define F2FS_GOING_DOWN_METAFLUSH	0x3	/* going down with meta flush */
 
 #if defined(__KERNEL__) && defined(CONFIG_COMPAT)
 /*
@@ -783,7 +789,6 @@ enum {
 	SBI_NEED_FSCK,				/* need fsck.f2fs to fix */
 	SBI_POR_DOING,				/* recovery is doing or not */
 	SBI_NEED_SB_WRITE,			/* need to recover superblock */
-	SBI_NEED_CP,				/* need to checkpoint */
 };
 
 enum {
@@ -1113,13 +1118,6 @@ static inline void clear_ckpt_flags(struct f2fs_checkpoint *cp, unsigned int f)
 	cp->ckpt_flags = cpu_to_le32(ckpt_flags);
 }
 
-static inline bool f2fs_discard_en(struct f2fs_sb_info *sbi)
-{
-	struct request_queue *q = bdev_get_queue(sbi->sb->s_bdev);
-
-	return blk_queue_discard(q);
-}
-
 static inline void f2fs_lock_op(struct f2fs_sb_info *sbi)
 {
 	down_read(&sbi->cp_rwsem);
@@ -1241,10 +1239,6 @@ static inline void dec_valid_block_count(struct f2fs_sb_info *sbi,
 static inline void inc_page_count(struct f2fs_sb_info *sbi, int count_type)
 {
 	percpu_counter_inc(&sbi->nr_pages[count_type]);
-
-	if (count_type == F2FS_DIRTY_DATA || count_type == F2FS_INMEM_PAGES)
-		return;
-
 	set_sbi_flag(sbi, SBI_IS_DIRTY);
 }
 
@@ -1293,11 +1287,6 @@ static inline int get_blocktype_secs(struct f2fs_sb_info *sbi, int block_type)
 static inline block_t valid_user_blocks(struct f2fs_sb_info *sbi)
 {
 	return sbi->total_valid_block_count;
-}
-
-static inline block_t discard_blocks(struct f2fs_sb_info *sbi)
-{
-	return sbi->discard_blks;
 }
 
 static inline unsigned long __bitmap_size(struct f2fs_sb_info *sbi, int flag)
@@ -1978,25 +1967,21 @@ bool f2fs_fill_dentries(struct file *, void *, filldir_t,
 void do_make_empty_dir(struct inode *, struct inode *,
 			struct f2fs_dentry_ptr *);
 struct page *init_inode_metadata(struct inode *, struct inode *,
-		const struct qstr *, const struct qstr *, struct page *);
+			const struct qstr *, struct page *);
 void update_parent_metadata(struct inode *, struct inode *, unsigned int);
 int room_for_filename(const void *, int, int);
 void f2fs_drop_nlink(struct inode *, struct inode *);
-struct f2fs_dir_entry *__f2fs_find_entry(struct inode *, struct fscrypt_name *,
+struct f2fs_dir_entry *f2fs_find_entry(struct inode *, struct qstr *,
 							struct page **);
-struct f2fs_dir_entry *f2fs_find_entry(struct inode *, const struct qstr *,
-					struct page **);
 struct f2fs_dir_entry *f2fs_parent_dir(struct inode *, struct page **);
-ino_t f2fs_inode_by_name(struct inode *, const struct qstr *, struct page **);
+ino_t f2fs_inode_by_name(struct inode *, struct qstr *, struct page **);
 void f2fs_set_link(struct inode *, struct f2fs_dir_entry *,
 				struct page *, struct inode *);
 int update_dent_inode(struct inode *, struct inode *, const struct qstr *);
 void f2fs_update_dentry(nid_t ino, umode_t mode, struct f2fs_dentry_ptr *,
 			const struct qstr *, f2fs_hash_t , unsigned int);
 int f2fs_add_regular_entry(struct inode *, const struct qstr *,
-			const struct qstr *, struct inode *, nid_t, umode_t);
-int __f2fs_do_add_link(struct inode *, struct fscrypt_name*, struct inode *,
-			nid_t, umode_t);
+						struct inode *, nid_t, umode_t);
 int __f2fs_add_link(struct inode *, const struct qstr *, struct inode *, nid_t,
 			umode_t);
 void f2fs_delete_entry(struct f2fs_dir_entry *, struct page *, struct inode *,
@@ -2006,7 +1991,7 @@ bool f2fs_empty_dir(struct inode *);
 
 static inline int f2fs_add_link(struct dentry *dentry, struct inode *inode)
 {
-	return __f2fs_add_link(dentry->d_parent->d_inode, &dentry->d_name,
+	return __f2fs_add_link(d_inode(dentry->d_parent), &dentry->d_name,
 				inode, inode->i_ino, inode->i_mode);
 }
 
@@ -2201,7 +2186,7 @@ struct f2fs_stat_info {
 	int total_count, utilization;
 	int bg_gc, wb_bios;
 	int inline_xattr, inline_inode, inline_dir, orphans;
-	unsigned int valid_count, valid_node_count, valid_inode_count, discard_blks;
+	unsigned int valid_count, valid_node_count, valid_inode_count;
 	unsigned int bimodal, avg_vblocks;
 	int util_free, util_valid, util_invalid;
 	int rsvd_segs, overp_segs;
@@ -2364,10 +2349,10 @@ int f2fs_convert_inline_inode(struct inode *);
 int f2fs_write_inline_data(struct inode *, struct page *);
 bool recover_inline_data(struct inode *, struct page *);
 struct f2fs_dir_entry *find_in_inline_dir(struct inode *,
-			struct fscrypt_name *, struct page **);
+				struct fscrypt_name *, struct page **);
 int make_empty_inline_dir(struct inode *inode, struct inode *, struct page *);
-int f2fs_add_inline_entry(struct inode *, const struct qstr *,
-		const struct qstr *, struct inode *, nid_t, umode_t);
+int f2fs_add_inline_entry(struct inode *, const struct qstr *, struct inode *,
+						nid_t, umode_t);
 void f2fs_delete_inline_entry(struct f2fs_dir_entry *, struct page *,
 						struct inode *, struct inode *);
 bool f2fs_empty_inline_dir(struct inode *);
