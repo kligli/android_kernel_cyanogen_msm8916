@@ -161,9 +161,6 @@ static void reschedule_nodelay(void)
 	batt_level_check();
 	thermal_check();
 
-	if (!helper.enabled)
-		return;
-
 	cancel_delayed_work_sync(&helper_work);
 	queue_delayed_work(helper_wq, &helper_work, 0);
 }
@@ -221,16 +218,8 @@ void thermal_level_relay(long temp)
 static int state_notifier_callback(struct notifier_block *this,
 				unsigned long event, void *data)
 {
-	switch (event) {
-		case STATE_NOTIFIER_ACTIVE:
-			reschedule_nodelay();
-			break;
-		case STATE_NOTIFIER_SUSPEND:
-			reschedule_helper();
-			break;
-		default:
-			break;
-	}
+	if (helper.enabled)
+		reschedule_nodelay();
 
 	return NOTIFY_OK;
 }
