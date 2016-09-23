@@ -19,7 +19,6 @@
 		pm8916_chg: qcom,charger {
 			qcom,vddmax-mv = <4350>;
 			qcom,vddsafe-mv = <4350>;
-			qcom,parallel-charger;
 		};
 	};
 };
