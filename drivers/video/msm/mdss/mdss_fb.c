@@ -2888,9 +2888,10 @@ static int __mdss_fb_display_thread(void *data)
 				mfd->index);
 
 	while (1) {
-		wait_event(mfd->commit_wait_q,
-				(atomic_read(&mfd->commits_pending) ||
-				 kthread_should_stop()));
+		while (wait_event_interruptible(
+			mfd->commit_wait_q,
+			(atomic_read(&mfd->commits_pending) ||
+			kthread_should_stop())) != 0);
 
 		if (kthread_should_stop())
 			break;
@@ -2900,8 +2901,8 @@ static int __mdss_fb_display_thread(void *data)
 		wake_up_all(&mfd->idle_wait_q);
 	}
 
-	mdss_fb_release_kickoff(mfd);
 	atomic_set(&mfd->commits_pending, 0);
+	atomic_set(&mfd->kickoff_pending, 0);
 	wake_up_all(&mfd->idle_wait_q);
 
 	return ret;
