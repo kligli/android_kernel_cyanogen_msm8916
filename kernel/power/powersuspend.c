@@ -158,7 +158,8 @@ void set_power_suspend_state(int new_state)
 		#ifdef POWER_SUSPEND_DEBUG
 		pr_info("[POWERSUSPEND] state deactivated.\n");
 		#endif
-		sta#ifdef CONFIG_ADRENO_IDLER
+		state = new_state;
+		#ifdef CONFIG_ADRENO_IDLER
 		power_suspended = false;
 		#endifte = new_state;
 		
