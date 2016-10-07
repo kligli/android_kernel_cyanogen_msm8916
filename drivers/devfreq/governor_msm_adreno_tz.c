@@ -39,6 +39,7 @@ static DEFINE_SPINLOCK(tz_lock);
  * MIN_BUSY is 1 msec for the sample to be sent
  */
 #define MIN_BUSY		1000
+/*
 * Use BUSY_BIN to check for fully busy rendering
  * intervals that may need early intervention when
  * seen with LONG_FRAME lengths
