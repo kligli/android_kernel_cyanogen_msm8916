@@ -161,7 +161,7 @@ void set_power_suspend_state(int new_state)
 		state = new_state;
 		#ifdef CONFIG_ADRENO_IDLER
 		power_suspended = false;
-		#endifte = new_state;
+		#endif
 		
 		queue_work(suspend_work_queue, &power_resume_work);
 	}
