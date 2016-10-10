@@ -1730,7 +1730,6 @@ static int msm_lsm_open(struct snd_pcm_substream *substream)
 	prtd->lsm_client->poll_enable = true;
 	prtd->lsm_client->perf_mode = 0;
 	prtd->lsm_client->opened = false;
-
 	return 0;
 }
 
