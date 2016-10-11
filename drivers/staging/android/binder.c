@@ -1013,6 +1013,8 @@ static struct binder_ref *binder_get_ref(struct binder_proc *proc,
 		} else {
 			return ref;
 		}
+	}
+	return NULL;
 }
 
 static struct binder_ref *binder_get_ref_for_node(struct binder_proc *proc,
@@ -1566,7 +1568,6 @@ static void binder_transaction(struct binder_proc *proc,
 			fp->handle = ref->desc;
 			fp->cookie = 0;
 			binder_inc_ref(ref, fp->type == BINDER_TYPE_HANDLE,
-				       
 				       &thread->todo);
 
 			trace_binder_transaction_node_to_ref(t, node, ref);
