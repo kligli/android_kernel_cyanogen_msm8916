@@ -2132,7 +2132,7 @@ unsigned int snd_soc_read(struct snd_soc_codec *codec, unsigned int reg)
 {
 	unsigned int ret;
 
-	if (codec->read) {
+        if (codec->read) {
 		ret = codec->read(codec, reg);
 		dev_dbg(codec->dev, "read %x => %x\n", reg, ret);
 		trace_snd_soc_reg_read(codec, reg, ret);
