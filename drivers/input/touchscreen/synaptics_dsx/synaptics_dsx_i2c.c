@@ -158,6 +158,11 @@ static int synaptics_rmi4_i2c_write(struct synaptics_rmi4_data *rmi4_data,
 	msg[0].buf = buf;
 	}
 
+	msg[0].addr = i2c->addr;
+	msg[0].flags = 0;
+	msg[0].len = length + 1;
+	msg[0].buf = buf;
+
 	buf[0] = addr & MASK_8BIT;
 	memcpy(&buf[1], &data[0], length);
 
