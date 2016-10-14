@@ -48,8 +48,8 @@ config ZEN_DECISION
 	  by disabling these services.
 
 	  If unsure, say N.
-	  
-	  config CLUSTER_PLUG
+
+config CLUSTER_PLUG
         bool "Enable cluster-plug cpu hotplug driver"
         default n
         help
