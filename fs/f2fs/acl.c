@@ -248,7 +248,7 @@ static int f2fs_set_acl(struct inode *inode, int type,
 		return -EINVAL;
 	}
 
-	f2fs_mark_inode_dirty_sync(inode);
+	f2fs_mark_inode_dirty_sync(inode, true);
 
 	if (acl) {
 		value = f2fs_acl_to_disk(F2FS_I_SB(inode), acl, &size);
