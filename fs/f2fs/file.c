@@ -265,6 +265,7 @@ sync_nodes:
 	}
 
 	if (need_inode_block_update(sbi, ino)) {
+		f2fs_mark_inode_dirty_sync(inode, true);
 		f2fs_write_inode(inode, NULL);
 		goto sync_nodes;
 	}
@@ -745,7 +746,6 @@ int f2fs_setattr(struct dentry *dentry, struct iattr *attr)
 
 	/* inode change will produce dirty node pages flushed by checkpoint */
 	f2fs_balance_fs(F2FS_I_SB(inode), true);
-
 	return err;
 }
 

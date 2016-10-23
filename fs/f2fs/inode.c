@@ -21,9 +21,7 @@
 
 void f2fs_mark_inode_dirty_sync(struct inode *inode, bool sync)
 {
-	if (sync)
-		set_inode_flag(inode, FI_DIRTY_INODE_SYNC);
-	if (f2fs_inode_dirtied(inode))
+	if (f2fs_inode_dirtied(inode, sync))
 		return;
 
 	mark_inode_dirty_sync(inode);
@@ -334,11 +332,14 @@ int f2fs_write_inode(struct inode *inode, struct writeback_control *wbc)
 			inode->i_ino == F2FS_META_INO(sbi))
 		return 0;
 
+	if (!is_inode_flag_set(inode, FI_DIRTY_INODE))
+		return 0;
+
 	/*
 	 * We need to balance fs here to prevent from producing dirty node pages
 	 * during the urgent cleaning time when runing out of free sections.
 	 */
-	if (update_inode_page(inode))
+	if (update_inode_page(inode) && wbc && wbc->nr_to_write)
 		f2fs_balance_fs(sbi, true);
 	return 0;
 }
