@@ -265,6 +265,7 @@ sync_nodes:
 	}
 
 	if (need_inode_block_update(sbi, ino)) {
+		f2fs_mark_inode_dirty_sync(inode);
 		f2fs_write_inode(inode, NULL);
 		goto sync_nodes;
 	}
@@ -651,7 +652,7 @@ int f2fs_truncate(struct inode *inode)
 		return err;
 
 	inode->i_mtime = inode->i_ctime = CURRENT_TIME;
-	f2fs_mark_inode_dirty_sync(inode, false);
+	f2fs_mark_inode_dirty_sync(inode);
 	return 0;
 }
 
@@ -741,11 +742,10 @@ int f2fs_setattr(struct dentry *dentry, struct iattr *attr)
 	}
 
 	/* update attributes only */
-	f2fs_mark_inode_dirty_sync(inode, false);
+	f2fs_mark_inode_dirty_sync(inode);
 
 	/* inode change will produce dirty node pages flushed by checkpoint */
 	f2fs_balance_fs(F2FS_I_SB(inode), true);
-
 	return err;
 }
 
@@ -1424,7 +1424,7 @@ static long f2fs_fallocate(struct file *file, int mode,
 
 	if (!ret) {
 		inode->i_mtime = inode->i_ctime = CURRENT_TIME;
-		f2fs_mark_inode_dirty_sync(inode, false);
+		f2fs_mark_inode_dirty_sync(inode);
 		f2fs_update_time(F2FS_I_SB(inode), REQ_TIME);
 	}
 
