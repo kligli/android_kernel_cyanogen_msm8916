@@ -331,10 +331,8 @@ static int __commit_inmem_pages(struct inode *inode,
 
 			set_page_dirty(page);
 			f2fs_wait_on_page_writeback(page, DATA, true);
-			if (clear_page_dirty_for_io(page)) {
+			if (clear_page_dirty_for_io(page))
 				inode_dec_dirty_pages(inode);
-				remove_dirty_inode(inode);
-			}
 
 			fio.page = page;
 			err = do_write_data_page(&fio);
@@ -439,7 +437,7 @@ void f2fs_balance_fs_bg(struct f2fs_sb_info *sbi)
 	if (!available_free_memory(sbi, FREE_NIDS))
 		try_to_free_nids(sbi, MAX_FREE_NIDS);
 	else
-		build_free_nids(sbi, false);
+		build_free_nids(sbi);
 
 	/* checkpoint is the only way to shrink partial cached entries */
 	if (!available_free_memory(sbi, NAT_ENTRIES) ||
@@ -2298,10 +2296,10 @@ static void build_sit_entries(struct f2fs_sb_info *sbi)
 	int sit_blk_cnt = SIT_BLK_CNT(sbi);
 	unsigned int i, start, end;
 	unsigned int readed, start_blk = 0;
+	int nrpages = MAX_BIO_BLOCKS(sbi) * 8;
 
 	do {
-		readed = ra_meta_pages(sbi, start_blk, BIO_MAX_PAGES,
-							META_SIT, true);
+		readed = ra_meta_pages(sbi, start_blk, nrpages, META_SIT, true);
 
 		start = start_blk * sit_i->sents_per_block;
 		end = (start_blk + readed) * sit_i->sents_per_block;

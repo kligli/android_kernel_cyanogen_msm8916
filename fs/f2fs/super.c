@@ -619,25 +619,24 @@ static int f2fs_drop_inode(struct inode *inode)
 	return generic_drop_inode(inode);
 }
 
-int f2fs_inode_dirtied(struct inode *inode, bool sync)
+int f2fs_inode_dirtied(struct inode *inode)
 {
 	struct f2fs_sb_info *sbi = F2FS_I_SB(inode);
-	int ret = 0;
 
 	spin_lock(&sbi->inode_lock[DIRTY_META]);
 	if (is_inode_flag_set(inode, FI_DIRTY_INODE)) {
-		ret = 1;
-	} else {
-		set_inode_flag(inode, FI_DIRTY_INODE);
-		stat_inc_dirty_inode(sbi, DIRTY_META);
+		spin_unlock(&sbi->inode_lock[DIRTY_META]);
+		return 1;
 	}
-	if (sync && list_empty(&F2FS_I(inode)->gdirty_list)) {
-		list_add_tail(&F2FS_I(inode)->gdirty_list,
+
+	set_inode_flag(inode, FI_DIRTY_INODE);
+	list_add_tail(&F2FS_I(inode)->gdirty_list,
 				&sbi->inode_list[DIRTY_META]);
-		inc_page_count(sbi, F2FS_DIRTY_IMETA);
-	}
+	inc_page_count(sbi, F2FS_DIRTY_IMETA);
+	stat_inc_dirty_inode(sbi, DIRTY_META);
 	spin_unlock(&sbi->inode_lock[DIRTY_META]);
-	return ret;
+
+	return 0;
 }
 
 void f2fs_inode_synced(struct inode *inode)
@@ -649,12 +648,10 @@ void f2fs_inode_synced(struct inode *inode)
 		spin_unlock(&sbi->inode_lock[DIRTY_META]);
 		return;
 	}
-	if (!list_empty(&F2FS_I(inode)->gdirty_list)) {
-		list_del_init(&F2FS_I(inode)->gdirty_list);
-		dec_page_count(sbi, F2FS_DIRTY_IMETA);
-	}
+	list_del_init(&F2FS_I(inode)->gdirty_list);
 	clear_inode_flag(inode, FI_DIRTY_INODE);
 	clear_inode_flag(inode, FI_AUTO_RECOVER);
+	dec_page_count(sbi, F2FS_DIRTY_IMETA);
 	stat_dec_dirty_inode(F2FS_I_SB(inode), DIRTY_META);
 	spin_unlock(&sbi->inode_lock[DIRTY_META]);
 }
@@ -678,7 +675,7 @@ static void f2fs_dirty_inode(struct inode *inode, int flags)
 	if (is_inode_flag_set(inode, FI_AUTO_RECOVER))
 		clear_inode_flag(inode, FI_AUTO_RECOVER);
 
-	f2fs_inode_dirtied(inode, false);
+	f2fs_inode_dirtied(inode);
 }
 
 static void f2fs_i_callback(struct rcu_head *head)

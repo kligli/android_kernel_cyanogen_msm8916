@@ -227,7 +227,7 @@ void ra_meta_pages_cond(struct f2fs_sb_info *sbi, pgoff_t index)
 	f2fs_put_page(page, 0);
 
 	if (readahead)
-		ra_meta_pages(sbi, index, BIO_MAX_PAGES, META_POR, true);
+		ra_meta_pages(sbi, index, MAX_BIO_BLOCKS(sbi), META_POR, true);
 }
 
 static int f2fs_write_meta_page(struct page *page,
@@ -917,11 +917,7 @@ int f2fs_sync_inode_meta(struct f2fs_sb_info *sbi)
 		inode = igrab(&fi->vfs_inode);
 		spin_unlock(&sbi->inode_lock[DIRTY_META]);
 		if (inode) {
-			sync_inode_metadata(inode, 0);
-
-			/* it's on eviction */
-			if (is_inode_flag_set(inode, FI_DIRTY_INODE))
-				update_inode_page(inode);
+			update_inode_page(inode);
 			iput(inode);
 		}
 	};
@@ -987,7 +983,7 @@ static void unblock_operations(struct f2fs_sb_info *sbi)
 {
 	up_write(&sbi->node_write);
 
-	build_free_nids(sbi, false);
+	build_free_nids(sbi);
 	f2fs_unlock_all(sbi);
 }
 
