@@ -28,7 +28,6 @@
 #include <linux/device.h>
 #include <linux/notifier.h>
 #include <linux/slab.h>
-#include <linux/workqueue.h>
 #include <linux/platform_device.h>
 #include <linux/of.h>
 #include <linux/of_platform.h>
@@ -85,7 +84,6 @@ int msm_rpm_unregister_notifier(struct notifier_block *nb)
 	return atomic_notifier_chain_unregister(&msm_rpm_sleep_notifier, nb);
 }
 
-static struct workqueue_struct *msm_rpm_smd_wq;
 
 enum {
 	MSM_RPM_MSG_REQUEST_TYPE = 0,
@@ -346,7 +344,7 @@ struct msm_rpm_ack_msg {
 
 LIST_HEAD(msm_rpm_ack_list);
 
-static DECLARE_COMPLETION(data_ready);
+static struct tasklet_struct data_tasklet;
 
 static inline uint32_t msm_rpm_get_msg_id_from_ack(uint8_t *buf)
 {
@@ -357,7 +355,7 @@ static inline int msm_rpm_get_error_from_ack(uint8_t *buf)
 {
 	uint8_t *tmp;
 	uint32_t req_len = ((struct msm_rpm_ack_msg *)buf)->req_len;
-
+struct msm_rpm_ack_msg *tmp_buf = (struct msm_rpm_ack_msg *)buf;
 	int rc = -ENODEV;
 
 	req_len -= sizeof(struct msm_rpm_ack_msg);
@@ -367,7 +365,10 @@ static inline int msm_rpm_get_error_from_ack(uint8_t *buf)
 
 	tmp = buf + sizeof(struct msm_rpm_ack_msg);
 
-	BUG_ON(memcmp(tmp, ERR, sizeof(uint32_t)));
+	if (memcmp(tmp, ERR, sizeof(uint32_t))) {
+ 		pr_err("%s rpm returned error\n", __func__);
+ 		BUG_ON(1);
+ 	}
 
 	tmp += 2 * sizeof(uint32_t);
 
@@ -735,8 +736,8 @@ static void msm_rpm_notify(void *data, unsigned event)
 
 	switch (event) {
 	case SMD_EVENT_DATA:
+	tasklet_schedule(&data_tasklet);
 		trace_rpm_smd_interrupt_notify("interrupt notification");
-		complete(&data_ready);
 		break;
 	case SMD_EVENT_OPEN:
 		complete(&pdata->smd_open);
@@ -874,7 +875,10 @@ static int msm_rpm_read_smd_data(char *buf)
 	if (!pkt_sz)
 		return -EAGAIN;
 
-	BUG_ON(pkt_sz > MAX_ERR_BUFFER_SIZE);
+	if (pkt_sz > MAX_ERR_BUFFER_SIZE) {
+ 		pr_err("rpm_smd pkt_sz is greater than max size\n");
+ 		goto error;
+ 	}
 
 	if (pkt_sz != smd_read_avail(msm_rpm_data.ch_info))
 		return -EAGAIN;
@@ -888,32 +892,33 @@ static int msm_rpm_read_smd_data(char *buf)
 
 	} while (pkt_sz > 0);
 
-	BUG_ON(pkt_sz < 0);
+	if (pkt_sz < 0) {
+ 		pr_err("rpm_smd pkt_sz is less than zero\n");
+ 		goto error;
+ 	}
+ 	return 0;
+ error:
+ 	BUG_ON(1);
 
 	return 0;
 }
 
-static void msm_rpm_smd_work(struct work_struct *work)
+static void data_fn_tasklet(unsigned long data)
 {
 	uint32_t msg_id;
 	int errno;
 	char buf[MAX_ERR_BUFFER_SIZE] = {0};
 
-	while (1) {
-		while (wait_for_completion_interruptible(
-			&data_ready) != 0);
-
-		spin_lock(&msm_rpm_data.smd_lock_read);
-		while (smd_is_pkt_avail(msm_rpm_data.ch_info)) {
-			if (msm_rpm_read_smd_data(buf))
-				break;
-			msg_id = msm_rpm_get_msg_id_from_ack(buf);
-			errno = msm_rpm_get_error_from_ack((uint8_t *)buf);
-			trace_rpm_smd_ack_recvd(0, msg_id, errno);
-			msm_rpm_process_ack(msg_id, errno);
-		}
-		spin_unlock(&msm_rpm_data.smd_lock_read);
+	spin_lock(&msm_rpm_data.smd_lock_read);
+ 	while (smd_is_pkt_avail(msm_rpm_data.ch_info)) {
+ 		if (msm_rpm_read_smd_data(buf))
+ 			break;
+ 		msg_id = msm_rpm_get_msg_id_from_ack(buf);
+ 		errno = msm_rpm_get_error_from_ack(buf);
+ 		trace_rpm_smd_ack_recvd(0, msg_id, errno);
+ 		msm_rpm_process_ack(msg_id, errno);
 	}
+	spin_unlock(&msm_rpm_data.smd_lock_read);
 }
 
 static void msm_rpm_log_request(struct msm_rpm_request *cdata)
@@ -1431,20 +1436,12 @@ static int msm_rpm_dev_probe(struct platform_device *pdev)
 
 	spin_lock_init(&msm_rpm_data.smd_lock_write);
 	spin_lock_init(&msm_rpm_data.smd_lock_read);
-	INIT_WORK(&msm_rpm_data.work, msm_rpm_smd_work);
+	tasklet_init(&data_tasklet, data_fn_tasklet, 0);
 
 	wait_for_completion(&msm_rpm_data.smd_open);
 
 	smd_disable_read_intr(msm_rpm_data.ch_info);
 
-	msm_rpm_smd_wq = alloc_workqueue("rpm-smd",
-			WQ_UNBOUND | WQ_MEM_RECLAIM | WQ_HIGHPRI, 1);
-	if (!msm_rpm_smd_wq) {
-		pr_err("%s: Unable to alloc rpm-smd workqueue\n", __func__);
-		ret = -EINVAL;
-		goto fail;
-	}
-	queue_work(msm_rpm_smd_wq, &msm_rpm_data.work);
 
 	probe_status = ret;
 skip_smd_init:
