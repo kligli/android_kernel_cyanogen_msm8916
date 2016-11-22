@@ -1296,7 +1296,7 @@ wait_ack_cleanup:
 	spin_unlock_irqrestore(&msm_rpm_data.smd_lock_read, flags);
 
 	if (smd_is_pkt_avail(msm_rpm_data.ch_info))
-		complete(&data_ready);
+		tasklet_schedule(&data_tasklet);
 	return rc;
 }
 EXPORT_SYMBOL(msm_rpm_wait_for_ack_noirq);
