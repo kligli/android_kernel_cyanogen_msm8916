@@ -19,16 +19,16 @@
 
 #include "power.h"
 
-static bool enable_wlan_rx_wake_ws = true;
-module_param(enable_wlan_rx_wake_ws, bool, 0644);
-static bool enable_wlan_ctrl_wake_ws = true;
-module_param(enable_wlan_ctrl_wake_ws, bool, 0644);
-static bool enable_wlan_wake_ws = true;
-module_param(enable_wlan_wake_ws, bool, 0644);
+static bool enable_wlan_wow_wl_ws = true;
+module_param(enable_wlan_wow_wl_ws, bool, 0644);
+static bool enable_wlan_ws = true;
+module_param(enable_wlan_ws, bool, 0644);
 static bool enable_bluedroid_timer_ws = true;
 module_param(enable_bluedroid_timer_ws, bool, 0644);
-static bool enable_bluesleep_ws = true;
-module_param(enable_bluesleep_ws, bool, 0644);
+static bool enable_ipa_ws = true;
+module_param(enable_ipa_ws, bool, 0644);
+static bool enable_qcom_rx_wakelock_ws = true;
+module_param(enable_qcom_rx_wakelock_ws, bool, 0644);
 
 /*
  * If set, the suspend/hibernate code will abort transitions to a sleep state
@@ -506,28 +506,31 @@ static void wakeup_source_activate(struct wakeup_source *ws)
 {
 	unsigned int cec;
 
-	if (((!enable_wlan_rx_wake_ws && !strcmp(ws->name, "wlan_rx_wake")) ||
-		(!enable_wlan_ctrl_wake_ws &&
-			!strcmp(ws->name, "wlan_ctrl_wake")) ||
-		(!enable_wlan_wake_ws &&
-			!strcmp(ws->name, "wlan_wake")) ||
-		(!enable_bluedroid_timer_ws &&
-			!strcmp(ws->name, "bluedroid_timer")))) {
+
+	if (WARN(wakeup_source_not_registered(ws),
+			"unregistered wakeup source\n"))
+		return;
+
+	if (((!enable_bluedroid_timer_ws &&
+			!strncmp(ws->name, "bluedroid_timer", 15)) ||
+		(!enable_wlan_wow_wl_ws &&
+			!strncmp(ws->name, "wlan_wow_wl", 11)) ||
+		(!enable_wlan_ws &&
+			!strncmp(ws->name, "wlan", 4)) ||
+		(!enable_ipa_ws &&
+			!strncmp(ws->name, "IPA_WS", 6)) ||
+		(!enable_qcom_rx_wakelock_ws &&
+			!strncmp(ws->name, "qcom_rx_wakelock", 16)))) {
 		/*
 		 * let's try and deactivate this wakeup source since the user
 		 * clearly doesn't want it. The user is responsible for any
 		 * adverse effects and has been warned about it
 		 */
-		wakeup_source_deactivate(ws);
+		if (ws->active)
+			wakeup_source_deactivate(ws);
+
 		return;
 	}
-
-	if (!enable_bluesleep_ws && !strcmp(ws->name, "bluesleep"))
-		return;
-
-	if (WARN(wakeup_source_not_registered(ws),
-			"unregistered wakeup source\n"))
-		return;
 
 	/*
 	 * active wakeup source should bring the system

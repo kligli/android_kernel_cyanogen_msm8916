@@ -43,6 +43,10 @@ config IOSCHED_ROW
 	  according to queue priority.
 	  Most suitable for mobile devices.
 
+config IOSCHED_MAPLE
+	tristate "Maple I/O scheduler"
+	default y
+
 config IOSCHED_CFQ
 	tristate "CFQ I/O scheduler"
 	default y
@@ -174,6 +178,9 @@ choice
 	config DEFAULT_TRIPNDROID
 		bool "TRIPNDROID" if IOSCHED_TRIPNDROID=y
 
+	config DEFAULT_MAPLE
+		bool "Maple" if IOSCHED_MAPLE=y
+
 endchoice
 
 config DEFAULT_IOSCHED
@@ -188,6 +195,7 @@ config DEFAULT_IOSCHED
 	default "sioplus" if DEFAULT_SIOPLUS
 	default "zen" if DEFAULT_ZEN
 	default "tripndroid" if DEFAULT_TRIPNDROID
+	default "maple" if DEFAULT_MAPLE
 endmenu
 
 endif
