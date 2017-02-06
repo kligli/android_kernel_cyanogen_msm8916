@@ -388,7 +388,9 @@ KBUILD_CFLAGS   := -Wall -Wundef -Wstrict-prototypes -Wno-trigraphs \
            -fgcse-lm -fgcse-sm -fsched-spec-load -fsingle-precision-constant \
 		   -mcpu=cortex-a53 -mtune=cortex-a53 \
 		   -Wno-unused-variable \
-		   -Wno-bool-compare -Wno-misleading-indentation
+		   -Wno-bool-compare \
+		   -Wno-misleading-indentation \
+		   -Wno-shift-overflow 
 
 KBUILD_AFLAGS_KERNEL := 
 KBUILD_CFLAGS_KERNEL := 
