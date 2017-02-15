@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2016, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2017, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -503,7 +503,7 @@ static inline void mdss_mdp_pp_get_dcm_state(struct mdss_mdp_pipe *pipe,
 		*dcm_state = pipe->mixer_left->ctl->mfd->dcm_state;
 }
 
-inline int linear_map(int in, int *out, int in_max, int out_max)
+static inline int linear_map(int in, int *out, int in_max, int out_max)
 {
 	if (in < 0 || !out || in_max <= 0 || out_max <= 0)
 		return -EINVAL;
@@ -4762,7 +4762,7 @@ int mdss_mdp_ad_input(struct msm_fb_data_type *mfd,
 	mutex_lock(&ad->lock);
 	if ((!PP_AD_STATE_IS_INITCFG(ad->state) &&
 			!PP_AD_STS_IS_DIRTY(ad->sts)) &&
-			!input->mode == MDSS_AD_MODE_CALIB) {
+			(input->mode != MDSS_AD_MODE_CALIB)) {
 		pr_warn("AD not initialized or configured.\n");
 		ret = -EPERM;
 		goto error;
@@ -5716,9 +5716,6 @@ static int is_valid_calib_addr(void *addr, u32 operation)
 	int ret = 0;
 	char __iomem *ptr = addr;
 	char __iomem *mixer_base = mdss_res->mixer_intf->base;
-	char __iomem *rgb_base   = mdss_res->rgb_pipes->base;
-	char __iomem *dma_base   = mdss_res->dma_pipes->base;
-	char __iomem *vig_base   = mdss_res->vig_pipes->base;
 	char __iomem *ctl_base   = mdss_res->ctl_off->base;
 	char __iomem *dspp_base  = mdss_res->mixer_intf->dspp_base;
 
@@ -5750,17 +5747,20 @@ static int is_valid_calib_addr(void *addr, u32 operation)
 			if (ret)
 				goto valid_addr;
 		}
-		if (ptr >= vig_base) {
+		if (mdss_res->vig_pipes &&
+		    ptr >= mdss_res->vig_pipes->base) {
 			ret = is_valid_calib_vig_addr(ptr);
 			if (ret)
 				goto valid_addr;
 		}
-		if (ptr >= rgb_base) {
+		if (mdss_res->rgb_pipes &&
+		    ptr >= mdss_res->rgb_pipes->base) {
 			ret = is_valid_calib_rgb_addr(ptr);
 			if (ret)
 				goto valid_addr;
 		}
-		if (ptr >= dma_base) {
+		if (mdss_res->dma_pipes &&
+		    ptr >= mdss_res->dma_pipes->base) {
 			ret = is_valid_calib_dma_addr(ptr);
 			if (ret)
 				goto valid_addr;
