@@ -152,6 +152,10 @@ static int synaptics_rmi4_i2c_write(struct synaptics_rmi4_data *rmi4_data,
 	if (retval != PAGE_SELECT_LEN) {
 		retval = -EIO;
 		goto exit;
+		msg[0].addr = i2c->addr;
+	msg[0].flags = 0;
+	msg[0].len = length + 1;
+	msg[0].buf = buf;
 	}
 
 	msg[0].addr = i2c->addr;
