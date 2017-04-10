@@ -25,7 +25,7 @@ config HAS_WAKELOCK
 config WAKELOCK
 	bool
 	default y
-
+	
 config HIBERNATE_CALLBACKS
 	bool
 
@@ -288,3 +288,19 @@ config SUSPEND_TIME
 	  Prints the time spent in suspend in the kernel log, and
 	  keeps statistics on the time spent in suspend in
 	  /sys/kernel/debug/suspend_time
+config WQ_POWER_EFFICIENT
+       bool "Workqueue allocated as UNBOUND (by default) for power efficiency"
+       depends on PM
+       default n
+       help
+         Workqueues can be performance or power-oriented. Currently, most
+         workqueues are bound to the CPU they were created on. This gives good
+         performance (due to cache effects) at the cost of potentially waking
+         up otherwise idle cores just to process some work. To save power, we
+         can allow the work to be rescheduled on a core that is already awake.
+         Workqueues created with the WQ_UNBOUND flag will allow some power
+         savings.  However, we don't change the default behaviour of the
+         system.  To enable power-saving behaviour, a new config option
+         CONFIG_WQ_POWER_EFFICIENT needs to be turned on. This option can also
+         be overridden by the workqueue.power_efficient boot parameter.
+         If in doubt, say N.
