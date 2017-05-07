@@ -806,8 +806,6 @@ struct lpm_cluster *parse_cluster(struct device_node *node,
 			if (parse_cpu_levels(n, c))
 				goto failed_parse_cluster;
 
-			c->aff_level = 1;
-
 			for_each_cpu(i, &c->child_cpus) {
 				per_cpu(max_residency, i) = devm_kzalloc(
 					&lpm_pdev->dev,
