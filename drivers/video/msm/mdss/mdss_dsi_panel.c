@@ -51,7 +51,9 @@ char g_lcm_id[128];
 
 DEFINE_LED_TRIGGER(bl_led_trigger);
 
+#ifdef CONFIG_LAZYPLUG
 extern void lazyplug_enter_lazy(bool enter, bool video);
+#endif
 
 bool display_on = true;
 
@@ -672,7 +674,9 @@ static int mdss_dsi_panel_on(struct mdss_panel_data *pdata)
 	}
 
 	display_on = true;
+#ifdef CONFIG_LAZYPLUG
 	lazyplug_enter_lazy(false, false);
+#endif
 	
 #ifdef CONFIG_MACH_T86519A1
 	gpio_set_value(TPS65132_GPIO_POS_EN, 1);
@@ -765,7 +769,9 @@ static int mdss_dsi_panel_off(struct mdss_panel_data *pdata)
 		mdss_dsi_panel_cmds_send(ctrl, &ctrl->off_cmds);
 
 	display_on = false;
+#ifdef CONFIG_LAZYPLUG
 	lazyplug_enter_lazy(true, false);
+#endif
 
 end:
 	pinfo->blank_state = MDSS_PANEL_BLANK_BLANK;
