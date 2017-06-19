@@ -383,7 +383,10 @@ KBUILD_CFLAGS   := -Wall -Wundef -Wstrict-prototypes -Wno-trigraphs \
 		   -Wno-unused-const-variable \
 		   -Wno-bool-compare \
 		   -Wno-misleading-indentation \
-		   -Wno-shift-overflow 
+		   -Wno-shift-overflow \
+		   -Wno-int-in-bool-context \
+		   -Wno-switch-unreachable \
+		   -Wno-nonnull 
 
 KBUILD_AFLAGS_KERNEL :=
 KBUILD_CFLAGS_KERNEL :=
