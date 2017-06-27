@@ -24,7 +24,9 @@
 
 #define MAX_EVENTS 30
 
-extern void lazyplug_enter_lazy(bool enter);
+#ifdef CONFIG_LAZYPLUG
+extern void lazyplug_enter_lazy(bool enter, bool video);
+#endif
 
 static int get_poll_flags(void *instance)
 {
@@ -1358,7 +1360,9 @@ void *msm_vidc_open(int core_id, int session_type)
 		goto fail_setup;
 	}
 
-	lazyplug_enter_lazy(true);
+#ifdef CONFIG_LAZYPLUG
+	lazyplug_enter_lazy(true, true);
+#endif
 
 	return inst;
 
@@ -1420,7 +1424,6 @@ static void cleanup_instance(struct msm_vidc_inst *inst)
 			msm_comm_smem_free(inst, inst->extradata_handle);
 
 		debugfs_remove_recursive(inst->debugfs_root);
-
 		mutex_lock(&inst->pending_getpropq.lock);
 		WARN_ON(!list_empty(&inst->pending_getpropq.list)
 			&& (msm_vidc_debug & VIDC_INFO));
@@ -1491,7 +1494,9 @@ int msm_vidc_close(void *instance)
 			VIDC_MSG_PRIO2STRING(VIDC_INFO), inst);
 	kfree(inst);
 
-	lazyplug_enter_lazy(false);
+#ifdef CONFIG_LAZYPLUG
+	lazyplug_enter_lazy(false, true);
+#endif
 
 	return 0;
 }

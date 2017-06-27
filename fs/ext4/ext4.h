@@ -262,6 +262,9 @@ struct ext4_io_submit {
 				 (s)->s_first_ino)
 #endif
 #define EXT4_BLOCK_ALIGN(size, blkbits)		ALIGN((size), (1 << (blkbits)))
+#define EXT4_MAX_BLOCKS(size, offset, blkbits) \
+	((EXT4_BLOCK_ALIGN(size + offset, blkbits) >> blkbits) - (offset >> \
+								  blkbits))
 
 /* Translate a block number to a cluster number */
 #define EXT4_B2C(sbi, blk)	((blk) >> (sbi)->s_cluster_bits)
@@ -1426,7 +1429,7 @@ struct ext4_sb_info {
 	struct shrinker s_es_shrinker;
 	struct list_head s_es_lru;
 	struct ext4_es_stats s_es_stats;
-	struct mb2_cache *s_mb_cache;
+	struct mb_cache *s_mb_cache;
 	spinlock_t s_es_lru_lock ____cacheline_aligned_in_smp;
 
 	/* Ratelimit ext4 messages. */
@@ -2121,11 +2124,13 @@ extern struct kmem_cache *ext4_crypt_info_cachep;
 bool ext4_valid_contents_enc_mode(uint32_t mode);
 uint32_t ext4_validate_encryption_key_size(uint32_t mode, uint32_t size);
 extern struct workqueue_struct *ext4_read_workqueue;
-struct ext4_crypto_ctx *ext4_get_crypto_ctx(struct inode *inode);
+struct ext4_crypto_ctx *ext4_get_crypto_ctx(struct inode *inode,
+					    gfp_t gfp_flags);
 void ext4_release_crypto_ctx(struct ext4_crypto_ctx *ctx);
 void ext4_restore_control_page(struct page *data_page);
 struct page *ext4_encrypt(struct inode *inode,
-			  struct page *plaintext_page);
+			  struct page *plaintext_page,
+			  gfp_t gfp_flags);
 int ext4_decrypt(struct page *page);
 int ext4_encrypted_zeroout(struct inode *inode, struct ext4_extent *ex);
 extern const struct dentry_operations ext4_encrypted_d_ops;
@@ -2308,6 +2313,7 @@ extern int ext4_init_inode_table(struct super_block *sb,
 extern void ext4_end_bitmap_read(struct buffer_head *bh, int uptodate);
 
 /* mballoc.c */
+extern const struct file_operations ext4_seq_mb_groups_fops;
 extern long ext4_mb_stats;
 extern long ext4_mb_max_to_scan;
 extern int ext4_mb_init(struct super_block *);
@@ -2414,7 +2420,6 @@ extern int ext4_search_dir(struct buffer_head *bh,
 			   int buf_size,
 			   struct inode *dir,
 			   struct ext4_filename *fname,
-			   const struct qstr *d_name,
 			   unsigned int offset,
 			   struct ext4_dir_entry_2 **res_dir);
 extern int ext4_generic_delete_entry(handle_t *handle,
@@ -2435,6 +2440,7 @@ extern int ext4_group_extend(struct super_block *sb,
 extern int ext4_resize_fs(struct super_block *sb, ext4_fsblk_t n_blocks_count);
 
 /* super.c */
+extern int ext4_seq_options_show(struct seq_file *seq, void *offset);
 extern int ext4_calculate_overhead(struct super_block *sb);
 extern void ext4_superblock_csum_set(struct super_block *sb);
 extern void *ext4_kvmalloc(size_t size, gfp_t flags);
@@ -2878,7 +2884,6 @@ extern int htree_inlinedir_to_tree(struct file *dir_file,
 				   int *has_inline_data);
 extern struct buffer_head *ext4_find_inline_entry(struct inode *dir,
 					struct ext4_filename *fname,
-					const struct qstr *d_name,
 					struct ext4_dir_entry_2 **res_dir,
 					int *has_inline_data);
 extern int ext4_delete_inline_entry(handle_t *handle,
@@ -2945,6 +2950,12 @@ extern int ext4_mpage_readpages(struct address_space *mapping,
 /* symlink.c */
 extern const struct inode_operations ext4_symlink_inode_operations;
 extern const struct inode_operations ext4_fast_symlink_inode_operations;
+
+/* sysfs.c */
+extern int ext4_register_sysfs(struct super_block *sb);
+extern void ext4_unregister_sysfs(struct super_block *sb);
+extern int __init ext4_init_sysfs(void);
+extern void ext4_exit_sysfs(void);
 
 /* block_validity */
 extern void ext4_release_system_zone(struct super_block *sb);
@@ -3101,5 +3112,8 @@ extern int ext4_resize_begin(struct super_block *sb);
 extern void ext4_resize_end(struct super_block *sb);
 
 #endif	/* __KERNEL__ */
+
+#define EFSBADCRC	EBADMSG		/* Bad CRC detected */
+#define EFSCORRUPTED	EUCLEAN		/* Filesystem is corrupted */
 
 #endif	/* _EXT4_H */

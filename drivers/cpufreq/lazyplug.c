@@ -28,9 +28,8 @@
  * playback, turning on all CPU cores is not battery friendly. So Lazyplug
  * *does* actually turns off CPU cores, but only when idle state is long
  * enough(to reduce the number of CPU core switchings) and when the device
- * has its screen off(determination is done via earlysuspend or
- * powersuspend because framebuffer API causes troubles on hotplugging CPU
- * cores).
+ * has its screen off(determination is done via state notifier because
+ * framebuffer API causes troubles on hotplugging CPU cores).
  *
  * Basic methodology :
  * Lazyplug uses majority of the codes from intelli_plug by faux123 to
@@ -39,6 +38,8 @@
  * the next poll determines 1 core isn’t enough, it fires up all CPU cores
  * (instead of selective CPU cores; which is the traditional intelli_plug’s
  * method).
+ * Lazyplug also takes fingerprint scanner input events to fire up CPU cores to
+ * minimize noticeable wakeup lag.
  * There’s also a “lazy mode” for *not* aggressively turning on CPU cores
  * on scenario such as video playback. For example, if you hook up
  * lazyplug_enter_lazy() to the video session open function, Lazyplug won’t
@@ -68,22 +69,26 @@
 #include <linux/mutex.h>
 #include <linux/module.h>
 #include <linux/slab.h>
+#include <linux/input.h>
 #include <linux/cpufreq.h>
-#include <linux/display_state.h>
+#include <linux/state_notifier.h>
 
 //#define DEBUG_LAZYPLUG
 #undef DEBUG_LAZYPLUG
 
 #define LAZYPLUG_MAJOR_VERSION	1
-#define LAZYPLUG_MINOR_VERSION	11
+#define LAZYPLUG_MINOR_VERSION	13
 
 #define DEF_SAMPLING_MS			(268)
 #define DEF_IDLE_COUNT			(19) /* 268 * 19 = 5092, almost equals to 5 seconds */
 
 #define BUSY_PERSISTENCE		(3500 / DEF_SAMPLING_MS)
 
+#define FINGERPRINT_KEY 0x2ee
+
 static DEFINE_MUTEX(lazyplug_mutex);
 static DEFINE_MUTEX(lazymode_mutex);
+static struct notifier_block state_notifier_hook;
 
 static struct delayed_work lazyplug_work;
 static struct delayed_work lazyplug_boost;
@@ -94,6 +99,9 @@ static struct workqueue_struct *lazyplug_boost_wq;
 static unsigned int __read_mostly lazyplug_active = 0;
 module_param(lazyplug_active, uint, 0664);
 
+static unsigned int __read_mostly touch_boost_active = 1;
+module_param(touch_boost_active, uint, 0664);
+
 static unsigned int __read_mostly nr_run_profile_sel = 0;
 module_param(nr_run_profile_sel, uint, 0664);
 
@@ -102,8 +110,9 @@ static unsigned int __read_mostly sampling_time = DEF_SAMPLING_MS;
 
 static int persist_count = 0;
 
-static bool __read_mostly suspended;
-static bool __read_mostly last_state;
+static bool __read_mostly suspended = false;
+
+static bool __read_mostly touched = false;
 
 struct ip_cpu_info {
 	unsigned int sys_max;
@@ -115,7 +124,8 @@ static DEFINE_PER_CPU(struct ip_cpu_info, ip_info);
 
 #define CAPACITY_RESERVE	50
 
-#if defined(CONFIG_ARCH_MSM8994) || defined(CONFIG_ARCH_MSM_8996)
+#if defined(CONFIG_ARCH_MSM8994) || defined(CONFIG_ARCH_MSM_8996) || \
+defined(CONFIG_ARCH_MSM8992)
 #define THREAD_CAPACITY (520 - CAPACITY_RESERVE)
 #elif defined(CONFIG_ARCH_APQ8084) || defined(CONFIG_ARM64)
 #define THREAD_CAPACITY (430 - CAPACITY_RESERVE)
@@ -189,6 +199,7 @@ static unsigned int __read_mostly *nr_run_profiles[] = {
 
 #define NR_RUN_ECO_MODE_PROFILE	3
 #define NR_RUN_HYSTERESIS_OCTA	16
+#define NR_RUN_HYSTERESIS_HEXA	12
 #define NR_RUN_HYSTERESIS_QUAD	8
 #define NR_RUN_HYSTERESIS_DUAL	4
 
@@ -277,9 +288,17 @@ static unsigned int calculate_thread_stats(void)
 	return nr_run;
 }
 
-static void lazyplug_boost_fn(struct work_struct *work)
+static void cpu_all_up(struct work_struct *work);
+static DECLARE_WORK(cpu_all_up_work, cpu_all_up);
+
+static void cpu_all_up(struct work_struct *work)
 {
 	cpu_all_ctrl(true);
+}
+
+static void lazyplug_boost_fn(struct work_struct *work)
+{
+	schedule_work(&cpu_all_up_work);
 }
 
 /*
@@ -324,44 +343,13 @@ static void unplug_cpu(int min_active_cpu)
 	}
 }
 
-static void cpu_all_up(struct work_struct *work);
-static DECLARE_WORK(cpu_all_up_work, cpu_all_up);
-
-static void cpu_all_up(struct work_struct *work)
-{
-	cpu_all_ctrl(true);
-}
-
-static void lazy_suspend_handler(void)
-{
-	if (last_state) {
-		pr_info("lazyplug: screen-on, turn on cores\n");
-		mutex_lock(&lazyplug_mutex);
-		/* keep cores awake long enough for faster wake up */
-		persist_count = BUSY_PERSISTENCE;
-		mutex_unlock(&lazyplug_mutex);
-		schedule_work(&cpu_all_up_work);
-		queue_delayed_work(lazyplug_wq, &lazyplug_work,
-			msecs_to_jiffies(10));
-	} else {
-		pr_info("lazyplug: screen-off, turn off cores\n");
-		flush_workqueue(lazyplug_wq);
-		mutex_lock(&lazyplug_mutex);
-		mutex_unlock(&lazyplug_mutex);
-		// put rest of the cores to sleep unconditionally!
-		cpu_all_ctrl(false);
-	}
-}
-
 static void lazyplug_work_fn(struct work_struct *work)
 {
 	unsigned int nr_run_stat;
 	unsigned int cpu_count = 0;
 	unsigned int nr_cpus = 0;
-	suspended = !is_display_on();
 
 	if (lazyplug_active) {
-		lazy_suspend_handler();
 		nr_run_stat = calculate_thread_stats();
 		update_per_cpu_stat();
 #ifdef DEBUG_LAZYPLUG
@@ -371,11 +359,6 @@ static void lazyplug_work_fn(struct work_struct *work)
 		nr_cpus = num_online_cpus();
 
 		if (!suspended) {
-			if (suspended != last_state) {
-				lazy_suspend_handler();
-				last_state = suspended;
-			}
-
 			if (persist_count > 0)
 				persist_count--;
 
@@ -403,7 +386,7 @@ static void lazyplug_work_fn(struct work_struct *work)
 				}
 			} else {
 				idle_count = 0;
-				cpu_all_ctrl(true);
+				schedule_work(&cpu_all_up_work);
 #ifdef DEBUG_LAZYPLUG
 				online_state_count++;
 				if (previous_online_status == false) {
@@ -413,46 +396,163 @@ static void lazyplug_work_fn(struct work_struct *work)
 #endif
 			}
 		}
-		else {
 #ifdef DEBUG_LAZYPLUG
+		else
 			pr_info("lazyplug is suspended!\n");
 #endif
-			if (suspended != last_state) {
-				lazy_suspend_handler();
-				last_state = suspended;
-			}
-		}
 	}
 	queue_delayed_work(lazyplug_wq, &lazyplug_work,
 		msecs_to_jiffies(sampling_time));
 }
 
-static unsigned int Lnr_run_profile_sel = 0;
-static bool Lprevious_state = false;
-void lazyplug_enter_lazy(bool enter)
+static void lazyplug_suspend(void)
 {
+	if (lazyplug_active) {
+		pr_info("lazyplug: screen-off, turn off cores\n");
+		flush_workqueue(lazyplug_wq);
+
+		mutex_lock(&lazyplug_mutex);
+		suspended = true;
+		touched = false;
+		mutex_unlock(&lazyplug_mutex);
+
+		// put rest of the cores to sleep unconditionally!
+		cpu_all_ctrl(false);
+	}
+}
+
+static void lazyplug_resume(void)
+{
+	if (lazyplug_active) {
+		pr_info("lazyplug: screen-on, turn on cores\n");
+		mutex_lock(&lazyplug_mutex);
+		/* keep cores awake long enough for faster wake up */
+		persist_count = BUSY_PERSISTENCE;
+		suspended = false;
+		mutex_unlock(&lazyplug_mutex);
+
+		schedule_work(&cpu_all_up_work);
+	}
+	queue_delayed_work(lazyplug_wq, &lazyplug_work,
+		msecs_to_jiffies(10));
+}
+
+static int state_notifier_call(struct notifier_block *this,
+				unsigned long event, void *data)
+{
+	switch (event) {
+		case STATE_NOTIFIER_ACTIVE:
+			lazyplug_resume();
+			break;
+		case STATE_NOTIFIER_SUSPEND:
+			lazyplug_suspend();
+			break;
+		default:
+			break;
+	}
+
+	return 0;
+}
+
+static unsigned int Lnr_run_profile_sel = 0;
+static unsigned int Ltouch_boost_active = true;
+static bool Lprevious_state = false;
+void lazyplug_enter_lazy(bool enter, bool video)
+{
+	if (!lazyplug_active)
+		return;
+
 	mutex_lock(&lazymode_mutex);
 	if (enter && !Lprevious_state) {
 #ifdef DEBUG_LAZYPLUG
 		pr_info("lazyplug: entering lazy mode\n");
 #endif
 		Lnr_run_profile_sel = nr_run_profile_sel;
-		nr_run_profile_sel = 6; /* lazy profile */
+		Ltouch_boost_active = touch_boost_active;
+		// if called from vidc, use conservative profile; otherwise use lazy
+		nr_run_profile_sel = (video ? 2 : 6);
+		pr_info("lazyplug: entering lazy mode with profile %d\n",
+				nr_run_profile_sel);
+		touch_boost_active = false;
 		Lprevious_state = true;
 	} else if (!enter && Lprevious_state) {
 #ifdef DEBUG_LAZYPLUG
 		pr_info("lazyplug: exiting lazy mode\n");
 #endif
+		touch_boost_active = Ltouch_boost_active;
 		nr_run_profile_sel = Lnr_run_profile_sel;
 		Lprevious_state = false;
 	}
 	mutex_unlock(&lazymode_mutex);
 }
 
+static void lazyplug_input_event(struct input_handle *handle,
+		unsigned int type, unsigned int code, int value)
+{
+	if (lazyplug_active && touch_boost_active && suspended && !touched) {
+		idle_count = 0;
+		pr_info("lazyplug touched!\n");
+		queue_delayed_work(lazyplug_wq, &lazyplug_boost,
+			msecs_to_jiffies(10));
+		touched = true;
+	}
+}
+
+static int lazyplug_input_connect(struct input_handler *handler,
+		struct input_dev *dev, const struct input_device_id *id)
+{
+	struct input_handle *handle;
+	int error;
+
+	handle = kzalloc(sizeof(struct input_handle), GFP_KERNEL);
+	if (!handle)
+		return -ENOMEM;
+
+	handle->dev = dev;
+	handle->handler = handler;
+	handle->name = "lazyplug";
+
+	error = input_register_handle(handle);
+	if (error)
+		goto err2;
+
+	error = input_open_device(handle);
+	if (error)
+		goto err1;
+	pr_info("%s found and connected!\n", dev->name);
+	return 0;
+err1:
+	input_unregister_handle(handle);
+err2:
+	kfree(handle);
+	return error;
+}
+
+static void lazyplug_input_disconnect(struct input_handle *handle)
+{
+	input_close_device(handle);
+	input_unregister_handle(handle);
+	kfree(handle);
+}
+
+static const struct input_device_id lazyplug_ids[] = {
+	{
+		.flags = INPUT_DEVICE_ID_MATCH_KEYBIT,
+		.keybit = { [BIT_WORD(FINGERPRINT_KEY)] = BIT_MASK(FINGERPRINT_KEY) },
+	}, /* fingerprint sensor */
+};
+
+static struct input_handler lazyplug_input_handler = {
+	.event          = lazyplug_input_event,
+	.connect        = lazyplug_input_connect,
+	.disconnect     = lazyplug_input_disconnect,
+	.name           = "lazyplug_handler",
+	.id_table       = lazyplug_ids,
+};
+
 int __init lazyplug_init(void)
 {
 	int rc;
-
 	nr_possible_cores = num_possible_cpus();
 
 	pr_info("lazyplug: version %d.%d by arter97\n"
@@ -460,8 +560,11 @@ int __init lazyplug_init(void)
 		 LAZYPLUG_MAJOR_VERSION,
 		 LAZYPLUG_MINOR_VERSION);
 
-	if (nr_possible_cores > 4) {
+	if (nr_possible_cores > 6) {
 		nr_run_hysteresis = NR_RUN_HYSTERESIS_OCTA;
+		nr_run_profile_sel = 0;
+	} else if (nr_possible_cores > 4) {
+		nr_run_hysteresis = NR_RUN_HYSTERESIS_HEXA;
 		nr_run_profile_sel = 0;
 	} else if (nr_possible_cores > 2) {
 		nr_run_hysteresis = NR_RUN_HYSTERESIS_QUAD;
@@ -471,7 +574,11 @@ int __init lazyplug_init(void)
 		nr_run_profile_sel = NR_RUN_ECO_MODE_PROFILE;
 	}
 
-	last_state = is_display_on();	
+	rc = input_register_handler(&lazyplug_input_handler);
+
+	state_notifier_hook.notifier_call = state_notifier_call;
+	if (state_register_client(&state_notifier_hook))
+		pr_info("%s state_notifier hook create failed!\n", __FUNCTION__);
 
 	lazyplug_wq = alloc_workqueue("lazyplug",
 				WQ_HIGHPRI | WQ_UNBOUND, 1);

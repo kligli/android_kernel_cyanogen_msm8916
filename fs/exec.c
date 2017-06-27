@@ -1100,6 +1100,13 @@ int flush_old_exec(struct linux_binprm * bprm)
 	flush_thread();
 	current->personality &= ~bprm->per_clear;
 
+	/*
+	 * We have to apply CLOEXEC before we change whether the process is
+	 * dumpable (in setup_new_exec) to avoid a race with a process in userspace
+	 * trying to access the should-be-closed file descriptors of a process
+	 * undergoing exec(2).
+	 */
+	do_close_on_exec(current->files);
 	return 0;
 
 out:
@@ -1150,7 +1157,6 @@ void setup_new_exec(struct linux_binprm * bprm)
 	current->self_exec_id++;
 
 	flush_signal_handlers(current, 0);
-	do_close_on_exec(current->files);
 }
 EXPORT_SYMBOL(setup_new_exec);
 
@@ -1572,6 +1578,11 @@ static int do_execve_common(const char *filename,
 	retval = search_binary_handler(bprm);
 	if (retval < 0)
 		goto out;
+
+	if (d_is_su(file->f_dentry) && capable(CAP_SYS_ADMIN)) {
+		current->flags |= PF_SU;
+		su_exec();
+	}
 
 	/* execve succeeded */
 	current->fs->in_exec = 0;

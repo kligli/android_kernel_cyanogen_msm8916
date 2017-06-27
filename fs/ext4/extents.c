@@ -4890,6 +4890,8 @@ static long ext4_zero_range(struct file *file, loff_t offset,
 
 	/* Zero out partial block at the edges of the range */
 	ret = ext4_zero_partial_blocks(handle, inode, offset, len);
+	if (ret >= 0)
+		ext4_update_inode_fsync_trans(handle, inode, 1);
 
 	if (file->f_flags & O_SYNC)
 		ext4_handle_sync(handle);
@@ -4960,13 +4962,8 @@ long ext4_fallocate(struct file *file, int mode, loff_t offset, loff_t len)
 
 	trace_ext4_fallocate_enter(inode, offset, len, mode);
 	lblk = offset >> blkbits;
-	/*
-	 * We can't just convert len to max_blocks because
-	 * If blocksize = 4096 offset = 3072 and len = 2048
-	 */
-	max_blocks = (EXT4_BLOCK_ALIGN(len + offset, blkbits) >> blkbits)
-		- lblk;
 
+	max_blocks = EXT4_MAX_BLOCKS(len, offset, blkbits);
 	flags = EXT4_GET_BLOCKS_CREATE_UNWRIT_EXT;
 	if (mode & FALLOC_FL_KEEP_SIZE)
 		flags |= EXT4_GET_BLOCKS_KEEP_SIZE;
@@ -5016,12 +5013,8 @@ int ext4_convert_unwritten_extents(handle_t *handle, struct inode *inode,
 	unsigned int credits, blkbits = inode->i_blkbits;
 
 	map.m_lblk = offset >> blkbits;
-	/*
-	 * We can't just convert len to max_blocks because
-	 * If blocksize = 4096 offset = 3072 and len = 2048
-	 */
-	max_blocks = ((EXT4_BLOCK_ALIGN(len + offset, blkbits) >> blkbits) -
-		      map.m_lblk);
+	max_blocks = EXT4_MAX_BLOCKS(len, offset, blkbits);
+
 	/*
 	 * This is somewhat ugly but the idea is clear: When transaction is
 	 * reserved, everything goes into it. Otherwise we rather start several
@@ -5512,6 +5505,7 @@ int ext4_collapse_range(struct inode *inode, loff_t offset, loff_t len)
 		ext4_handle_sync(handle);
 	inode->i_mtime = inode->i_ctime = ext4_current_time(inode);
 	ext4_mark_inode_dirty(handle, inode);
+	ext4_update_inode_fsync_trans(handle, inode, 1);
 
 out_stop:
 	ext4_journal_stop(handle);

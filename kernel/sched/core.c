@@ -114,6 +114,38 @@ do {							\
 	local_irq_restore(dflags);			\
 } while (0)
 
+static atomic_t __su_instances;
+
+int su_instances(void)
+{
+	return atomic_read(&__su_instances);
+}
+
+bool su_running(void)
+{
+	return su_instances() > 0;
+}
+
+bool su_visible(void)
+{
+	kuid_t uid = current_uid();
+	if (su_running())
+		return true;
+	if (uid_eq(uid, GLOBAL_ROOT_UID) || uid_eq(uid, GLOBAL_SYSTEM_UID))
+		return true;
+	return false;
+}
+
+void su_exec(void)
+{
+	atomic_inc(&__su_instances);
+}
+
+void su_exit(void)
+{
+	atomic_dec(&__su_instances);
+}
+
 const char *task_event_names[] = {"PUT_PREV_TASK", "PICK_NEXT_TASK",
 				  "TASK_WAKE", "TASK_MIGRATE", "TASK_UPDATE",
 				"IRQ_UPDATE"};
@@ -227,14 +259,12 @@ struct static_key sched_feat_keys[__SCHED_FEAT_NR] = {
 
 static void sched_feat_disable(int i)
 {
-	if (static_key_enabled(&sched_feat_keys[i]))
-		static_key_slow_dec(&sched_feat_keys[i]);
+	static_key_disable(&sched_feat_keys[i]);
 }
 
 static void sched_feat_enable(int i)
 {
-	if (!static_key_enabled(&sched_feat_keys[i]))
-		static_key_slow_inc(&sched_feat_keys[i]);
+	static_key_enable(&sched_feat_keys[i]);
 }
 #else
 static void sched_feat_disable(int i) { };
@@ -2319,13 +2349,21 @@ scale_load_to_freq(u64 load, unsigned int src_freq, unsigned int dst_freq)
 	return div64_u64(load * (u64)src_freq, (u64)dst_freq);
 }
 
+<<<<<<< HEAD
 void sched_get_cpus_busy(struct sched_load *busy,
 			 const struct cpumask *query_cpus)
+=======
+void sched_get_cpus_busy(unsigned long *busy, const struct cpumask *query_cpus)
+>>>>>>> 1165248627edcb96edd78b299b7094c25d2c110e
 {
 	unsigned long flags;
 	struct rq *rq;
 	const int cpus = cpumask_weight(query_cpus);
+<<<<<<< HEAD
 	u64 load[cpus], nload[cpus];
+=======
+	u64 load[cpus];
+>>>>>>> 1165248627edcb96edd78b299b7094c25d2c110e
 	unsigned int cur_freq[cpus], max_freq[cpus];
 	int notifier_sent[cpus];
 	int cpu, i = 0;
@@ -2350,7 +2388,10 @@ void sched_get_cpus_busy(struct sched_load *busy,
 
 		update_task_ravg(rq->curr, rq, TASK_UPDATE, sched_clock(), 0);
 		load[i] = rq->old_busy_time = rq->prev_runnable_sum;
+<<<<<<< HEAD
 		nload[i] = rq->nt_prev_runnable_sum;
+=======
+>>>>>>> 1165248627edcb96edd78b299b7094c25d2c110e
 		/*
 		 * Scale load in reference to rq->max_possible_freq.
 		 *
@@ -2358,7 +2399,10 @@ void sched_get_cpus_busy(struct sched_load *busy,
 		 * rq->max_freq.
 		 */
 		load[i] = scale_load_to_cpu(load[i], cpu);
+<<<<<<< HEAD
 		nload[i] = scale_load_to_cpu(nload[i], cpu);
+=======
+>>>>>>> 1165248627edcb96edd78b299b7094c25d2c110e
 
 		notifier_sent[i] = rq->notifier_sent;
 		rq->notifier_sent = 0;
@@ -2378,6 +2422,7 @@ void sched_get_cpus_busy(struct sched_load *busy,
 		if (!notifier_sent[i]) {
 			load[i] = scale_load_to_freq(load[i], max_freq[i],
 						     cur_freq[i]);
+<<<<<<< HEAD
 			nload[i] = scale_load_to_freq(nload[i], max_freq[i],
 						      cur_freq[i]);
 			if (load[i] > window_size)
@@ -2401,6 +2446,20 @@ void sched_get_cpus_busy(struct sched_load *busy,
 
 		trace_sched_get_busy(cpu, busy[i].prev_load,
 				     busy[i].new_task_load);
+=======
+			if (load[i] > window_size)
+				load[i] = window_size;
+			load[i] = scale_load_to_freq(load[i], cur_freq[i],
+						     rq->max_possible_freq);
+		} else {
+			load[i] = scale_load_to_freq(load[i], max_freq[i],
+						     rq->max_possible_freq);
+		}
+
+		busy[i] = div64_u64(load[i], NSEC_PER_USEC);
+
+		trace_sched_get_busy(cpu, busy[i]);
+>>>>>>> 1165248627edcb96edd78b299b7094c25d2c110e
 		i++;
 	}
 }
@@ -2408,12 +2467,20 @@ void sched_get_cpus_busy(struct sched_load *busy,
 unsigned long sched_get_busy(int cpu)
 {
 	struct cpumask query_cpu = CPU_MASK_NONE;
+<<<<<<< HEAD
 	struct sched_load busy;
+=======
+	unsigned long busy;
+>>>>>>> 1165248627edcb96edd78b299b7094c25d2c110e
 
 	cpumask_set_cpu(cpu, &query_cpu);
 	sched_get_cpus_busy(&busy, &query_cpu);
 
+<<<<<<< HEAD
 	return busy.prev_load;
+=======
+	return busy;
+>>>>>>> 1165248627edcb96edd78b299b7094c25d2c110e
 }
 
 void sched_set_io_is_busy(int val)
@@ -10182,23 +10249,6 @@ static void cpu_cgroup_css_offline(struct cgroup *cgrp)
 	sched_offline_group(tg);
 }
 
-static int
-cpu_cgroup_allow_attach(struct cgroup *cgrp, struct cgroup_taskset *tset)
-{
-	const struct cred *cred = current_cred(), *tcred;
-	struct task_struct *task;
-
-	cgroup_taskset_for_each(task, cgrp, tset) {
-		tcred = __task_cred(task);
-
-		if ((current != task) && !capable(CAP_SYS_NICE) &&
-		    cred->euid != tcred->uid && cred->euid != tcred->suid)
-			return -EACCES;
-	}
-
-	return 0;
-}
-
 static int cpu_cgroup_can_attach(struct cgroup *cgrp,
 				 struct cgroup_taskset *tset)
 {
@@ -10587,7 +10637,7 @@ struct cgroup_subsys cpu_cgroup_subsys = {
 	.css_offline	= cpu_cgroup_css_offline,
 	.can_attach	= cpu_cgroup_can_attach,
 	.attach		= cpu_cgroup_attach,
-	.allow_attach	= cpu_cgroup_allow_attach,
+	.allow_attach	= subsys_cgroup_allow_attach,
 	.exit		= cpu_cgroup_exit,
 	.subsys_id	= cpu_cgroup_subsys_id,
 	.base_cftypes	= cpu_files,
