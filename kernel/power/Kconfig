@@ -288,7 +288,7 @@ config SUSPEND_TIME
 	  Prints the time spent in suspend in the kernel log, and
 	  keeps statistics on the time spent in suspend in
 	  /sys/kernel/debug/suspend_time
-<<<<<<< HEAD
+
 config WQ_POWER_EFFICIENT
        bool "Workqueue allocated as UNBOUND (by default) for power efficiency"
        depends on PM
@@ -305,7 +305,6 @@ config WQ_POWER_EFFICIENT
          CONFIG_WQ_POWER_EFFICIENT needs to be turned on. This option can also
          be overridden by the workqueue.power_efficient boot parameter.
          If in doubt, say N.
-=======
 
 config QUICK_WAKEUP
 	bool "Quick wakeup"
@@ -330,4 +329,3 @@ config PARTIALRESUME
 	  Partial resume will occur only if all wakeup sources have
 	  partial-resume handlers associated with them, and they all return
 	  true.
->>>>>>> 1165248627edcb96edd78b299b7094c25d2c110e
